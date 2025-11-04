@@ -1,50 +1,51 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import DraftCard from "@/components/DraftCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import type { Draft, Website } from "@shared/schema";
 
 export default function Drafts() {
   const { toast } = useToast();
-  const [drafts] = useState([
-    {
-      id: '1',
-      title: "The Future of AI in Web Development",
-      excerpt: "Artificial intelligence is revolutionizing how we build and maintain websites. From automated testing to intelligent code completion, AI tools are becoming indispensable...",
-      wordCount: 1543,
-      readabilityScore: 78,
-      keywordDensity: 2.3,
-      status: "draft" as const,
+  const [selectedWebsiteId, setSelectedWebsiteId] = useState<string>("");
+
+  const { data: websites = [] } = useQuery<Website[]>({
+    queryKey: ["/api/websites"],
+  });
+
+  const { data: drafts = [], isLoading } = useQuery<Draft[]>({
+    queryKey: ["/api/websites", selectedWebsiteId, "drafts"],
+    enabled: !!selectedWebsiteId,
+  });
+
+  const pushToGitHub = useMutation({
+    mutationFn: async (draftId: string) => {
+      return apiRequest(`/api/drafts/${draftId}/push-to-github`, "POST") as unknown as { prUrl: string };
     },
-    {
-      id: '2',
-      title: "Understanding TypeScript Generics",
-      excerpt: "TypeScript generics provide a powerful way to create reusable components that work with multiple types while maintaining type safety...",
-      wordCount: 2087,
-      readabilityScore: 72,
-      keywordDensity: 3.5,
-      status: "review" as const,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/websites", selectedWebsiteId, "drafts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      toast({
+        title: "Pushed to GitHub",
+        description: `Pull request created: ${data.prUrl}`,
+      });
     },
-    {
-      id: '3',
-      title: "10 SEO Strategies That Actually Work in 2024",
-      excerpt: "Search engine optimization continues to evolve. Here are the most effective strategies that will help your content rank higher and attract more organic traffic...",
-      wordCount: 2156,
-      readabilityScore: 85,
-      keywordDensity: 3.1,
-      status: "pr_created" as const,
-      prUrl: "https://github.com/user/repo/pull/123",
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to push to GitHub",
+        variant: "destructive",
+      });
     },
-    {
-      id: '4',
-      title: "React Performance Optimization Best Practices",
-      excerpt: "Performance is critical for modern web applications. Learn how to optimize your React applications for better user experience and SEO...",
-      wordCount: 1789,
-      readabilityScore: 81,
-      keywordDensity: 2.8,
-      status: "merged" as const,
-      prUrl: "https://github.com/user/repo/pull/120",
-    },
-  ]);
+  });
 
   const handleView = (title: string) => {
     toast({
@@ -60,16 +61,22 @@ export default function Drafts() {
     });
   };
 
-  const handlePush = (title: string) => {
-    toast({
-      title: "Pushing to GitHub",
-      description: `Creating pull request for "${title}"`,
-    });
+  const handlePush = (id: string) => {
+    pushToGitHub.mutate(id);
   };
 
-  const handleDownload = (title: string) => {
+  const handleDownload = (title: string, content: string) => {
+    const blob = new Blob([content], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${title.toLowerCase().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-")}.mdx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
     toast({
-      title: "Download",
+      title: "Download Started",
       description: `Downloading "${title}.mdx"`,
     });
   };
@@ -81,6 +88,20 @@ export default function Drafts() {
     merged: drafts.filter(d => d.status === "merged"),
   };
 
+  useEffect(() => {
+    if (!selectedWebsiteId && websites.length > 0) {
+      setSelectedWebsiteId(websites[0].id);
+    }
+  }, [websites, selectedWebsiteId]);
+
+  if (websites.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-muted-foreground">Please add a website first to generate drafts.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -90,75 +111,133 @@ export default function Drafts() {
             Manage and publish your AI-generated article drafts.
           </p>
         </div>
+        <Select value={selectedWebsiteId} onValueChange={setSelectedWebsiteId}>
+          <SelectTrigger className="w-[200px]" data-testid="select-website">
+            <SelectValue placeholder="Select website" />
+          </SelectTrigger>
+          <SelectContent>
+            {websites.map((website) => (
+              <SelectItem key={website.id} value={website.id}>
+                {website.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      <Tabs defaultValue="all" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="all" data-testid="tab-all">
-            All ({drafts.length})
-          </TabsTrigger>
-          <TabsTrigger value="draft" data-testid="tab-draft">
-            Draft ({draftsByStatus.draft.length})
-          </TabsTrigger>
-          <TabsTrigger value="review" data-testid="tab-review">
-            Review ({draftsByStatus.review.length})
-          </TabsTrigger>
-          <TabsTrigger value="published" data-testid="tab-published">
-            Published ({draftsByStatus.pr_created.length + draftsByStatus.merged.length})
-          </TabsTrigger>
-        </TabsList>
+      {isLoading ? (
+        <div>Loading...</div>
+      ) : (
+        <Tabs defaultValue="all" className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="all" data-testid="tab-all">
+              All ({drafts.length})
+            </TabsTrigger>
+            <TabsTrigger value="draft" data-testid="tab-draft">
+              Draft ({draftsByStatus.draft.length})
+            </TabsTrigger>
+            <TabsTrigger value="review" data-testid="tab-review">
+              Review ({draftsByStatus.review.length})
+            </TabsTrigger>
+            <TabsTrigger value="published" data-testid="tab-published">
+              Published ({draftsByStatus.pr_created.length + draftsByStatus.merged.length})
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="all" className="grid gap-6 md:grid-cols-2">
-          {drafts.map((draft) => (
-            <DraftCard
-              key={draft.id}
-              {...draft}
-              onView={() => handleView(draft.title)}
-              onEdit={() => handleEdit(draft.title)}
-              onPushToGitHub={() => handlePush(draft.title)}
-              onDownload={() => handleDownload(draft.title)}
-            />
-          ))}
-        </TabsContent>
+          <TabsContent value="all" className="grid gap-6 md:grid-cols-2">
+            {drafts.map((draft) => (
+              <DraftCard
+                key={draft.id}
+                title={draft.title}
+                excerpt={draft.excerpt}
+                wordCount={draft.wordCount}
+                readabilityScore={draft.readabilityScore}
+                keywordDensity={draft.keywordDensity}
+                status={draft.status}
+                prUrl={draft.prUrl || undefined}
+                onView={() => handleView(draft.title)}
+                onEdit={() => handleEdit(draft.title)}
+                onPushToGitHub={() => handlePush(draft.id)}
+                onDownload={() => handleDownload(draft.title, draft.content)}
+              />
+            ))}
+            {drafts.length === 0 && (
+              <div className="col-span-2 text-center py-12">
+                <p className="text-muted-foreground">No drafts yet. Approve some article ideas first!</p>
+              </div>
+            )}
+          </TabsContent>
 
-        <TabsContent value="draft" className="grid gap-6 md:grid-cols-2">
-          {draftsByStatus.draft.map((draft) => (
-            <DraftCard
-              key={draft.id}
-              {...draft}
-              onView={() => handleView(draft.title)}
-              onEdit={() => handleEdit(draft.title)}
-              onPushToGitHub={() => handlePush(draft.title)}
-              onDownload={() => handleDownload(draft.title)}
-            />
-          ))}
-        </TabsContent>
+          <TabsContent value="draft" className="grid gap-6 md:grid-cols-2">
+            {draftsByStatus.draft.map((draft) => (
+              <DraftCard
+                key={draft.id}
+                title={draft.title}
+                excerpt={draft.excerpt}
+                wordCount={draft.wordCount}
+                readabilityScore={draft.readabilityScore}
+                keywordDensity={draft.keywordDensity}
+                status={draft.status}
+                onView={() => handleView(draft.title)}
+                onEdit={() => handleEdit(draft.title)}
+                onPushToGitHub={() => handlePush(draft.id)}
+                onDownload={() => handleDownload(draft.title, draft.content)}
+              />
+            ))}
+            {draftsByStatus.draft.length === 0 && (
+              <div className="col-span-2 text-center py-12">
+                <p className="text-muted-foreground">No draft articles.</p>
+              </div>
+            )}
+          </TabsContent>
 
-        <TabsContent value="review" className="grid gap-6 md:grid-cols-2">
-          {draftsByStatus.review.map((draft) => (
-            <DraftCard
-              key={draft.id}
-              {...draft}
-              onView={() => handleView(draft.title)}
-              onEdit={() => handleEdit(draft.title)}
-              onPushToGitHub={() => handlePush(draft.title)}
-              onDownload={() => handleDownload(draft.title)}
-            />
-          ))}
-        </TabsContent>
+          <TabsContent value="review" className="grid gap-6 md:grid-cols-2">
+            {draftsByStatus.review.map((draft) => (
+              <DraftCard
+                key={draft.id}
+                title={draft.title}
+                excerpt={draft.excerpt}
+                wordCount={draft.wordCount}
+                readabilityScore={draft.readabilityScore}
+                keywordDensity={draft.keywordDensity}
+                status={draft.status}
+                onView={() => handleView(draft.title)}
+                onEdit={() => handleEdit(draft.title)}
+                onPushToGitHub={() => handlePush(draft.id)}
+                onDownload={() => handleDownload(draft.title, draft.content)}
+              />
+            ))}
+            {draftsByStatus.review.length === 0 && (
+              <div className="col-span-2 text-center py-12">
+                <p className="text-muted-foreground">No articles in review.</p>
+              </div>
+            )}
+          </TabsContent>
 
-        <TabsContent value="published" className="grid gap-6 md:grid-cols-2">
-          {[...draftsByStatus.pr_created, ...draftsByStatus.merged].map((draft) => (
-            <DraftCard
-              key={draft.id}
-              {...draft}
-              onView={() => handleView(draft.title)}
-              onEdit={() => handleEdit(draft.title)}
-              onDownload={() => handleDownload(draft.title)}
-            />
-          ))}
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="published" className="grid gap-6 md:grid-cols-2">
+            {[...draftsByStatus.pr_created, ...draftsByStatus.merged].map((draft) => (
+              <DraftCard
+                key={draft.id}
+                title={draft.title}
+                excerpt={draft.excerpt}
+                wordCount={draft.wordCount}
+                readabilityScore={draft.readabilityScore}
+                keywordDensity={draft.keywordDensity}
+                status={draft.status}
+                prUrl={draft.prUrl || undefined}
+                onView={() => handleView(draft.title)}
+                onEdit={() => handleEdit(draft.title)}
+                onDownload={() => handleDownload(draft.title, draft.content)}
+              />
+            ))}
+            {draftsByStatus.pr_created.length + draftsByStatus.merged.length === 0 && (
+              <div className="col-span-2 text-center py-12">
+                <p className="text-muted-foreground">No published articles yet.</p>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      )}
     </div>
   );
 }
