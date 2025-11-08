@@ -39,9 +39,13 @@ export const websites = pgTable("websites", {
   githubRepo: text("github_repo"),
   githubBranch: text("github_branch").default("main"),
   githubPath: text("github_path").default("blog"),
+  ctaText: text("cta_text"), // Call to action text
+  ctaUrl: text("cta_url"), // Call to action URL
   lastGenerated: timestamp("last_generated"),
   totalArticles: integer("total_articles").notNull().default(0),
   nextScheduled: timestamp("next_scheduled"),
+  scrapedData: jsonb("scraped_data"), // Stores analyzed content, FAQs, SEO insights
+  lastScraped: timestamp("last_scraped"), // When website was last scraped
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -93,6 +97,7 @@ export const drafts = pgTable("drafts", {
   status: draftStatusEnum("status").notNull().default("draft"),
   prUrl: text("pr_url"),
   frontmatter: jsonb("frontmatter"),
+  imageUrl: text("image_url"), // AI-generated image URL
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

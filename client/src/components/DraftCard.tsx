@@ -11,9 +11,12 @@ interface DraftCardProps {
   keywordDensity: number;
   status: "draft" | "review" | "pr_created" | "merged";
   prUrl?: string;
+  imageUrl?: string;
   onView?: () => void;
   onEdit?: () => void;
-  onPushToGitHub?: () => void;
+  onSendToReview?: () => void;
+  onPublish?: () => void;
+  onReject?: () => void;
   onDownload?: () => void;
 }
 
@@ -25,9 +28,12 @@ export default function DraftCard({
   keywordDensity,
   status,
   prUrl,
+  imageUrl,
   onView,
   onEdit,
-  onPushToGitHub,
+  onSendToReview,
+  onPublish,
+  onReject,
   onDownload,
 }: DraftCardProps) {
   const statusConfig = {
@@ -40,9 +46,19 @@ export default function DraftCard({
   return (
     <Card className="p-6 space-y-4">
       <div className="flex items-start gap-4">
-        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 flex-shrink-0">
-          <FileText className="h-6 w-6 text-primary" />
-        </div>
+        {imageUrl ? (
+          <div className="flex-shrink-0 w-24 h-24 rounded-lg overflow-hidden border">
+            <img
+              src={imageUrl}
+              alt={title}
+              className="w-full h-full object-cover"
+            />
+          </div>
+        ) : (
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 flex-shrink-0">
+            <FileText className="h-6 w-6 text-primary" />
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <h3 className="text-lg font-semibold mb-1">{title}</h3>
           <p className="text-sm text-muted-foreground line-clamp-2">{excerpt}</p>
@@ -92,15 +108,34 @@ export default function DraftCard({
           <Edit className="h-4 w-4 mr-2" />
           Edit
         </Button>
-        {status === "draft" || status === "review" ? (
+        {status === "draft" ? (
           <Button
             size="sm"
-            onClick={onPushToGitHub}
-            data-testid="button-push-github"
+            onClick={onSendToReview}
+            data-testid="button-send-to-review"
           >
             <GitPullRequest className="h-4 w-4 mr-2" />
-            Push to GitHub
+            Send to Review
           </Button>
+        ) : status === "review" ? (
+          <>
+            <Button
+              size="sm"
+              onClick={onPublish}
+              data-testid="button-publish"
+            >
+              <GitPullRequest className="h-4 w-4 mr-2" />
+              Publish
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={onReject}
+              data-testid="button-reject"
+            >
+              Reject
+            </Button>
+          </>
         ) : null}
         <Button
           size="sm"

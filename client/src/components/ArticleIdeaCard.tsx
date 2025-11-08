@@ -16,6 +16,8 @@ interface ArticleIdeaCardProps {
   onApprove?: () => void;
   onReject?: () => void;
   onEdit?: () => void;
+  onGenerateDraft?: () => void;
+  isGenerating?: boolean;
 }
 
 export default function ArticleIdeaCard({
@@ -30,6 +32,8 @@ export default function ArticleIdeaCard({
   onApprove,
   onReject,
   onEdit,
+  onGenerateDraft,
+  isGenerating,
 }: ArticleIdeaCardProps) {
   const confidenceColor = confidence >= 80 ? "text-green-600" : confidence >= 60 ? "text-yellow-600" : "text-red-600";
   const seoScoreColor = seoScore >= 80 ? "bg-green-500" : seoScore >= 60 ? "bg-yellow-500" : "bg-red-500";
@@ -97,14 +101,26 @@ export default function ArticleIdeaCard({
             Reject
           </Button>
         </div>
-      ) : status === "approved" && scheduledDate ? (
+      ) : status === "approved" ? (
         <div className="pt-2 border-t">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Scheduled for draft:</span>
-            <span className="font-medium">{scheduledDate}</span>
-          </div>
-          <Button variant="outline" className="w-full mt-2" data-testid="button-generate-now">
-            Generate Draft Now
+          {scheduledDate && (
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span className="text-muted-foreground">Scheduled for draft:</span>
+              <span className="font-medium">{scheduledDate}</span>
+            </div>
+          )}
+          <Button 
+            variant="outline" 
+            className="w-full" 
+            onClick={onGenerateDraft}
+            disabled={isGenerating}
+            data-testid="button-generate-now"
+          >
+            {isGenerating ? (
+              <>Generating draft...</>
+            ) : (
+              <>Generate Draft Now</>
+            )}
           </Button>
         </div>
       ) : null}

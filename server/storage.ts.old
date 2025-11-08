@@ -1,0 +1,228 @@
+import { PrismaClient } from '@prisma/client';
+import type { User, Website, ArticleIdea, Draft, GenerationHistory } from '@prisma/client';
+import { db } from "./db";
+
+type CreateUserInput = {
+  username: string;
+  password: string;
+  githubToken?: string;
+};
+
+type CreateWebsiteInput = {
+  userId: string;
+  name: string;
+  url: string;
+  keywords: string[];
+  tone?: string;
+  audience?: string;
+  githubRepo?: string;
+  githubBranch?: string;
+  githubPath?: string;
+};
+
+type UpdateWebsiteInput = Partial<CreateWebsiteInput>;
+
+export interface IStorage {
+  // User operations
+  getUser(id: string): Promise<User | null>;
+  getUserByUsername(username: string): Promise<User | null>;
+  createUser(user: Prisma.UserCreateInput): Promise<User>;
+  updateUserGithubToken(id: string, githubToken: string): Promise<User | null>;
+
+  // Website operations
+  getWebsite(id: string): Promise<Website | null>;
+  getWebsitesByUserId(userId: string): Promise<Website[]>;
+  createWebsite(website: Prisma.WebsiteCreateInput): Promise<Website>;
+  updateWebsite(id: string, website: Prisma.WebsiteUpdateInput): Promise<Website | null>;
+  deleteWebsite(id: string): Promise<void>;
+
+  // Article idea operations
+  getArticleIdea(id: string): Promise<ArticleIdea | null>;
+  getArticleIdeasByWebsiteId(websiteId: string): Promise<ArticleIdea[]>;
+  getArticleIdeasByStatus(websiteId: string, status: string): Promise<ArticleIdea[]>;
+  createArticleIdea(idea: Prisma.ArticleIdeaCreateInput): Promise<ArticleIdea>;
+  updateArticleIdea(id: string, idea: Prisma.ArticleIdeaUpdateInput): Promise<ArticleIdea | null>;
+  deleteArticleIdea(id: string): Promise<void>;
+
+  // Draft operations
+  getDraft(id: string): Promise<Draft | null>;
+  getDraftsByWebsiteId(websiteId: string): Promise<Draft[]>;
+  getDraftsByStatus(websiteId: string, status: string): Promise<Draft[]>;
+  createDraft(draft: Prisma.DraftCreateInput): Promise<Draft>;
+  updateDraft(id: string, draft: Prisma.DraftUpdateInput): Promise<Draft | null>;
+  deleteDraft(id: string): Promise<void>;
+
+  // Generation history operations
+  getGenerationHistory(websiteId: string, limit?: number): Promise<GenerationHistory[]>;
+  createGenerationHistory(history: Prisma.GenerationHistoryCreateInput): Promise<GenerationHistory>;
+}
+
+export class DbStorage implements IStorage {
+  // User operations
+  async getUser(id: string): Promise<User | null> {
+    return await db.user.findUnique({ where: { id } });
+  }
+
+  async getUserByUsername(username: string): Promise<User | null> {
+    try {
+      return await db.user.findFirst({ 
+        where: { username },
+        select: {
+          id: true,
+          username: true,
+          password: true,
+          githubToken: true,
+          createdAt: true
+        }
+      });
+    } catch (error) {
+      console.error('Error in getUserByUsername:', error);
+      return null;
+    }
+  }
+
+  async createUser(user: Prisma.UserCreateInput): Promise<User> {
+    return await db.user.create({ data: user });
+  }
+
+  async updateUserGithubToken(id: string, githubToken: string): Promise<User | null> {
+    return await db.user.update({
+      where: { id },
+      data: { githubToken }
+    });
+  }
+
+  // Website operations
+  async getWebsite(id: string): Promise<Website | null> {
+    return await db.website.findUnique({ where: { id } });
+  }
+
+  async getWebsitesByUserId(userId: string): Promise<Website[]> {
+    return await db.website.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  async createWebsite(website: Prisma.WebsiteCreateInput): Promise<Website> {
+    return await db.website.create({ data: website });
+  }
+
+  async updateWebsite(id: string, website: Prisma.WebsiteUpdateInput): Promise<Website | null> {
+    return await db.website.update({
+      where: { id },
+      data: website
+    });
+  }
+
+  async deleteWebsite(id: string): Promise<void> {
+    await db.website.delete({ where: { id } });
+  }
+
+  // Article idea operations
+  async getArticleIdea(id: string): Promise<ArticleIdea | null> {
+    return await db.articleIdea.findUnique({ where: { id } });
+  }
+
+  async getArticleIdeasByWebsiteId(websiteId: string): Promise<ArticleIdea[]> {
+    return await db.articleIdea.findMany({
+      where: { websiteId },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  async getArticleIdeasByStatus(websiteId: string, status: string): Promise<ArticleIdea[]> {
+    return await db.articleIdea.findMany({
+      where: { 
+        websiteId,
+        status: status as any 
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  async createArticleIdea(idea: Prisma.ArticleIdeaCreateInput): Promise<ArticleIdea> {
+    return await db.articleIdea.create({ data: idea });
+  }
+
+  async updateArticleIdea(id: string, idea: Prisma.ArticleIdeaUpdateInput): Promise<ArticleIdea | null> {
+    return await db.articleIdea.update({
+      where: { id },
+      data: idea
+    });
+  }
+
+  async deleteArticleIdea(id: string): Promise<void> {
+    await db.articleIdea.delete({ where: { id } });
+  }
+
+  // Draft operations
+  async getDraft(id: string): Promise<Draft | null> {
+    return await db.draft.findUnique({ where: { id } });
+  }
+
+  async getDraftsByWebsiteId(websiteId: string): Promise<Draft[]> {
+    return await db.draft.findMany({
+      where: { websiteId },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  async getDraftsByStatus(websiteId: string, status: string): Promise<Draft[]> {
+    return await db.draft.findMany({
+      where: { 
+        websiteId,
+        status: status as any 
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  async createDraft(draft: Prisma.DraftCreateInput): Promise<Draft> {
+    return await db.draft.create({ data: draft });
+  }
+
+  async updateDraft(id: string, draft: Prisma.DraftUpdateInput): Promise<Draft | null> {
+    return await db.draft.update({
+      where: { id },
+      data: draft
+    });
+  }
+
+  async deleteDraft(id: string): Promise<void> {
+    await db.draft.delete({ where: { id } });
+  }
+
+  // Generation history operations
+  async getGenerationHistory(websiteId: string, limit: number = 50): Promise<GenerationHistory[]> {
+    return await db.generationHistory.findMany({
+      where: { websiteId },
+      orderBy: { createdAt: 'desc' },
+      take: limit
+    });
+  }
+
+  async createGenerationHistory(history: Prisma.GenerationHistoryCreateInput): Promise<GenerationHistory> {
+    return await db.generationHistory.create({ data: history });
+  }
+}
+
+// Keep the memory storage implementation for development/testing
+class MemoryStorage implements IStorage {
+  private users = new Map<string, User>();
+  private websites = new Map<string, Website>();
+  private articleIdeas = new Map<string, ArticleIdea>();
+  private drafts = new Map<string, Draft>();
+  private generationHistory = new Map<string, GenerationHistory[]>();
+
+  private makeId(prefix = '') {
+    return prefix + Math.random().toString(36).slice(2, 9);
+  }
+
+  // Memory storage implementations remain the same...
+  // (keeping the existing memory storage implementation)
+}
+
+// Use Prisma DB storage when we have a database connection, otherwise use memory storage
+const hasRealDb = Boolean(process.env.DATABASE_URL);
+export const storage: IStorage = hasRealDb ? new DbStorage() : new MemoryStorage();

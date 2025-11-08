@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import DraftCard from "@/components/DraftCard";
+import DraftViewDialog from "@/components/DraftViewDialog";
+import DraftEditDialog from "@/components/DraftEditDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -16,14 +18,52 @@ import type { Draft, Website } from "@shared/schema";
 export default function Drafts() {
   const { toast } = useToast();
   const [selectedWebsiteId, setSelectedWebsiteId] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<string>("draft");
+  const [viewingDraft, setViewingDraft] = useState<Draft | null>(null);
+  const [editingDraft, setEditingDraft] = useState<Draft | null>(null);
+  const [editingDraftTab, setEditingDraftTab] = useState<string>("draft");
 
   const { data: websites = [] } = useQuery<Website[]>({
     queryKey: ["/api/websites"],
   });
 
-  const { data: drafts = [], isLoading } = useQuery<Draft[]>({
+  const { data: drafts = [] } = useQuery<Draft[]>({
     queryKey: ["/api/websites", selectedWebsiteId, "drafts"],
     enabled: !!selectedWebsiteId,
+  });
+
+
+  const updateDraftStatus = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: "draft" | "review" | "pr_created" | "merged" }) => {
+      return apiRequest(`/api/drafts/${id}`, "PATCH", { status });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/websites", selectedWebsiteId, "drafts"] });
+      toast({
+        title: "Status Updated",
+        description: "Draft status has been updated successfully.",
+      });
+    },
+  });
+
+  const updateDraft = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Partial<Draft> }) => {
+      return apiRequest(`/api/drafts/${id}`, "PATCH", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/websites", selectedWebsiteId, "drafts"] });
+      toast({
+        title: "Draft Updated",
+        description: "Draft has been updated successfully.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update draft",
+        variant: "destructive",
+      });
+    },
   });
 
   const pushToGitHub = useMutation({
@@ -37,6 +77,7 @@ export default function Drafts() {
         title: "Pushed to GitHub",
         description: `Pull request created: ${data.prUrl}`,
       });
+      setActiveTab("published");
     },
     onError: (error: any) => {
       toast({
@@ -47,22 +88,27 @@ export default function Drafts() {
     },
   });
 
-  const handleView = (title: string) => {
-    toast({
-      title: "View Draft",
-      description: `Opening "${title}"`,
-    });
+  const handleView = (draft: Draft) => {
+    setViewingDraft(draft);
   };
 
-  const handleEdit = (title: string) => {
-    toast({
-      title: "Edit Draft",
-      description: `Editing "${title}"`,
-    });
+  const handleEdit = (draft: Draft, fromTab?: string) => {
+    setEditingDraft(draft);
+    // Determine status based on which tab the draft is in
+    const tabStatus = fromTab || activeTab;
+    setEditingDraftTab(tabStatus);
   };
 
-  const handlePush = (id: string) => {
-    pushToGitHub.mutate(id);
+  const handleSaveDraft = async (id: string, data: Partial<Draft>) => {
+    await updateDraft.mutateAsync({ id, data });
+  };
+
+  const handleDraftAction = (id: string, action: "review" | "publish" | "reject") => {
+    if (action === "publish") {
+      pushToGitHub.mutate(id);
+    } else if (action === "review" || action === "reject") {
+      updateDraftStatus.mutate({ id, status: action === "review" ? "review" : "draft" });
+    }
   };
 
   const handleDownload = (title: string, content: string) => {
@@ -125,14 +171,8 @@ export default function Drafts() {
         </Select>
       </div>
 
-      {isLoading ? (
-        <div>Loading...</div>
-      ) : (
-        <Tabs defaultValue="all" className="space-y-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList>
-            <TabsTrigger value="all" data-testid="tab-all">
-              All ({drafts.length})
-            </TabsTrigger>
             <TabsTrigger value="draft" data-testid="tab-draft">
               Draft ({draftsByStatus.draft.length})
             </TabsTrigger>
@@ -144,30 +184,6 @@ export default function Drafts() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="all" className="grid gap-6 md:grid-cols-2">
-            {drafts.map((draft) => (
-              <DraftCard
-                key={draft.id}
-                title={draft.title}
-                excerpt={draft.excerpt}
-                wordCount={draft.wordCount}
-                readabilityScore={draft.readabilityScore}
-                keywordDensity={draft.keywordDensity}
-                status={draft.status}
-                prUrl={draft.prUrl || undefined}
-                onView={() => handleView(draft.title)}
-                onEdit={() => handleEdit(draft.title)}
-                onPushToGitHub={() => handlePush(draft.id)}
-                onDownload={() => handleDownload(draft.title, draft.content)}
-              />
-            ))}
-            {drafts.length === 0 && (
-              <div className="col-span-2 text-center py-12">
-                <p className="text-muted-foreground">No drafts yet. Approve some article ideas first!</p>
-              </div>
-            )}
-          </TabsContent>
-
           <TabsContent value="draft" className="grid gap-6 md:grid-cols-2">
             {draftsByStatus.draft.map((draft) => (
               <DraftCard
@@ -178,9 +194,10 @@ export default function Drafts() {
                 readabilityScore={draft.readabilityScore}
                 keywordDensity={draft.keywordDensity}
                 status={draft.status}
-                onView={() => handleView(draft.title)}
-                onEdit={() => handleEdit(draft.title)}
-                onPushToGitHub={() => handlePush(draft.id)}
+                imageUrl={(draft as any).imageUrl}
+                onView={() => handleView(draft)}
+                onEdit={() => handleEdit(draft, "draft")}
+                onSendToReview={() => handleDraftAction(draft.id, "review")}
                 onDownload={() => handleDownload(draft.title, draft.content)}
               />
             ))}
@@ -201,9 +218,11 @@ export default function Drafts() {
                 readabilityScore={draft.readabilityScore}
                 keywordDensity={draft.keywordDensity}
                 status={draft.status}
-                onView={() => handleView(draft.title)}
-                onEdit={() => handleEdit(draft.title)}
-                onPushToGitHub={() => handlePush(draft.id)}
+                imageUrl={(draft as any).imageUrl}
+                onView={() => handleView(draft)}
+                onEdit={() => handleEdit(draft, "review")}
+                onPublish={() => handleDraftAction(draft.id, "publish")}
+                onReject={() => handleDraftAction(draft.id, "reject")}
                 onDownload={() => handleDownload(draft.title, draft.content)}
               />
             ))}
@@ -225,8 +244,9 @@ export default function Drafts() {
                 keywordDensity={draft.keywordDensity}
                 status={draft.status}
                 prUrl={draft.prUrl || undefined}
-                onView={() => handleView(draft.title)}
-                onEdit={() => handleEdit(draft.title)}
+                imageUrl={(draft as any).imageUrl}
+                onView={() => handleView(draft)}
+                onEdit={() => handleEdit(draft, "published")}
                 onDownload={() => handleDownload(draft.title, draft.content)}
               />
             ))}
@@ -237,7 +257,29 @@ export default function Drafts() {
             )}
           </TabsContent>
         </Tabs>
-      )}
+
+      <DraftViewDialog
+        draft={viewingDraft}
+        open={!!viewingDraft}
+        onOpenChange={(open) => !open && setViewingDraft(null)}
+      />
+
+      <DraftEditDialog
+        draft={editingDraft}
+        open={!!editingDraft}
+        onOpenChange={(open) => !open && setEditingDraft(null)}
+        onSave={handleSaveDraft}
+        isSaving={updateDraft.isPending}
+        defaultStatus={
+          editingDraftTab === "draft" 
+            ? "draft" 
+            : editingDraftTab === "review" 
+            ? "review" 
+            : editingDraftTab === "published"
+            ? editingDraft?.status || "pr_created" // Use draft's actual status for published tab
+            : editingDraft?.status || "draft"
+        }
+      />
     </div>
   );
 }

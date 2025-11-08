@@ -1,4 +1,14 @@
+import 'dotenv/config';
+// Debug print for GITHUB_TOKEN
+console.log('DEBUG GITHUB_TOKEN:', process.env.GITHUB_TOKEN ? process.env.GITHUB_TOKEN.slice(0, 4) + '...' : '<missing>');
 import express, { type Request, Response, NextFunction } from "express";
+
+// Debug: print whether critical env vars are present (masked) so we can diagnose startup issues
+if (process.env.NODE_ENV === 'development') {
+  const mask = (v?: string) => (v ? (v.length > 8 ? v.slice(0, 4) + '...' + v.slice(-4) : '****') : '<missing>');
+  // eslint-disable-next-line no-console
+  console.log(`env check: DATABASE_URL=${mask(process.env.DATABASE_URL)}, OPENAI_API_KEY=${process.env.OPENAI_API_KEY ? 'set' : '<missing>'}`);
+}
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
@@ -71,11 +81,13 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
+  const listenOpts: any = { port, host: "0.0.0.0" };
+  if (process.platform !== 'win32') {
+    // reusePort isn't supported on Windows; only set when not on Windows
+    listenOpts.reusePort = true;
+  }
+
+  server.listen(listenOpts, () => {
     log(`serving on port ${port}`);
   });
 })();

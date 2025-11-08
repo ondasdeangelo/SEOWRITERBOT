@@ -1,0 +1,146 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Enums
+enum WebsiteStatus {
+  active
+  paused
+  error
+}
+
+enum IdeaStatus {
+  pending
+  approved
+  rejected
+}
+
+enum DraftStatus {
+  draft
+  review
+  pr_created
+  merged
+}
+
+enum GenerationStatus {
+  success
+  failed
+  pending
+}
+
+// Models
+model User {
+  id          String    @id @default(uuid())
+  username    String    @unique
+  password    String
+  githubToken String?   @map("github_token")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  websites    Website[]
+
+  @@map("users")
+}
+
+model Website {
+  id            String    @id @default(uuid())
+  userId        String    @map("user_id")
+  name          String
+  url           String
+  keywords      String[]
+  tone          String?
+  audience      String?
+  status        WebsiteStatus @default(active)
+  githubRepo    String?   @map("github_repo")
+  githubBranch  String?   @default("main") @map("github_branch")
+  githubPath    String?   @default("blog") @map("github_path")
+  ctaText       String?   @map("cta_text")
+  ctaUrl        String?   @map("cta_url")
+  scrapedData   Json?     @map("scraped_data")
+  lastScraped   DateTime? @map("last_scraped")
+  lastGenerated DateTime? @map("last_generated")
+  totalArticles Int       @default(0) @map("total_articles")
+  nextScheduled DateTime? @map("next_scheduled")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+  
+  // Relations
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  articleIdeas     ArticleIdea[]
+  drafts          Draft[]
+  generationHistory GenerationHistory[]
+
+  @@map("websites")
+}
+
+model ArticleIdea {
+  id             String     @id @default(uuid())
+  websiteId      String     @map("website_id")
+  headline       String
+  confidence     Int
+  keywords       String[]
+  estimatedWords Int        @map("estimated_words")
+  seoScore       Int        @map("seo_score")
+  status         IdeaStatus @default(pending)
+  priority       Int?
+  scheduledDate  DateTime?  @map("scheduled_date")
+  metadata       Json?
+  createdAt      DateTime   @default(now()) @map("created_at")
+  
+  // Relations
+  website        Website    @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  drafts         Draft[]
+
+  @@map("article_ideas")
+}
+
+model Draft {
+  id               String      @id @default(uuid())
+  articleIdeaId    String      @map("article_idea_id")
+  websiteId        String      @map("website_id")
+  title           String
+  content         String
+  excerpt         String
+  wordCount       Int         @map("word_count")
+  readabilityScore Int         @map("readability_score")
+  keywordDensity  Float         @map("keyword_density")
+  status          DraftStatus @default(draft)
+  prUrl           String?     @map("pr_url")
+  frontmatter     Json?
+  imageUrl        String?     @map("image_url")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @default(now()) @updatedAt @map("updated_at")
+  
+  // Relations
+  articleIdea     ArticleIdea @relation(fields: [articleIdeaId], references: [id], onDelete: Cascade)
+  website         Website     @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@map("drafts")
+}
+
+model GenerationHistory {
+  id           String           @id @default(uuid())
+  websiteId    String           @map("website_id")
+  action       String
+  articleTitle String?          @map("article_title")
+  status       GenerationStatus
+  prUrl        String?          @map("pr_url")
+  errorMessage String?          @map("error_message")
+  metadata     Json?
+  createdAt    DateTime         @default(now()) @map("created_at")
+  
+  // Relations
+  website      Website          @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@map("generation_history")
+}

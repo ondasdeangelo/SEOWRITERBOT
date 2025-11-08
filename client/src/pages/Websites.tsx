@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import WebsiteCard from "@/components/WebsiteCard";
 import EmptyState from "@/components/EmptyState";
+import { WebsiteTable } from "@/components/WebsiteTable";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,10 +12,20 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Globe, Plus } from "lucide-react";
+import { Globe, Plus, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Website } from "@shared/schema";
@@ -36,8 +47,11 @@ const formatRelativeTime = (date: Date | string | null): string => {
 };
 
 export default function Websites() {
+  const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [websiteToDelete, setWebsiteToDelete] = useState<Website | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     url: "",
@@ -51,18 +65,66 @@ export default function Websites() {
 
   const { data: websites = [], isLoading } = useQuery<Website[]>({
     queryKey: ["/api/websites"],
+    refetchOnMount: true,
   });
 
   const createWebsite = useMutation({
     mutationFn: async (data: any) => {
-      return apiRequest("/api/websites", "POST", {
-        ...data,
-        keywords: data.keywords.split(",").map((k: string) => k.trim()),
-      });
+      const websiteData = {
+        name: data.name,
+        url: data.url,
+        keywords: data.keywords ? data.keywords.split(",").map((k: string) => k.trim()) : [],
+        tone: data.tone || null,
+        audience: data.audience || null,
+        githubRepo: data.githubRepo || null,
+        githubBranch: data.githubBranch || "main",
+        githubPath: data.githubPath || "blog",
+        status: "active" as const
+      };
+      return apiRequest<Website>("/api/websites", "POST", websiteData);
     },
-    onSuccess: () => {
+    onMutate: async (newWebsite) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ["/api/websites"] });
+      
+      // Snapshot the previous value
+      const previousWebsites = queryClient.getQueryData<Website[]>(["/api/websites"]);
+      
+      // Optimistically update to the new value
+      const optimisticWebsite: Website = {
+        id: `temp-${Date.now()}`,
+        userId: "",
+        name: newWebsite.name,
+        url: newWebsite.url,
+        keywords: newWebsite.keywords ? newWebsite.keywords.split(",").map((k: string) => k.trim()) : [],
+        tone: newWebsite.tone || null,
+        audience: newWebsite.audience || null,
+        status: "active",
+        githubRepo: newWebsite.githubRepo || null,
+        githubBranch: newWebsite.githubBranch || "main",
+        githubPath: newWebsite.githubPath || "blog",
+        totalArticles: 0,
+        lastGenerated: null,
+        nextScheduled: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      
+      queryClient.setQueryData<Website[]>(["/api/websites"], (old = []) => [optimisticWebsite, ...old]);
+      
+      return { previousWebsites };
+    },
+    onSuccess: (newWebsite) => {
+      // Replace optimistic update with real data
+      queryClient.setQueryData<Website[]>(["/api/websites"], (old = []) => {
+        const filtered = old.filter(w => !w.id.startsWith("temp-"));
+        return [newWebsite, ...filtered];
+      });
+      
+      // Invalidate to ensure we have the latest data
       queryClient.invalidateQueries({ queryKey: ["/api/websites"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      
       setOpen(false);
       setFormData({
         name: "",
@@ -74,12 +136,29 @@ export default function Websites() {
         githubBranch: "main",
         githubPath: "blog",
       });
-      toast({
-        title: "Website Added",
-        description: "Your website has been added successfully.",
+      
+      // Automatically generate ideas for the newly created website
+      generateIdeas.mutate({ websiteId: newWebsite.id, silent: true }, {
+        onSuccess: (data) => {
+          toast({
+            title: "Website Added & Ideas Generated",
+            description: `Your website has been added and ${data.result.length} article ideas have been generated!`,
+          });
+        },
+        onError: (error: any) => {
+          toast({
+            title: "Website Added",
+            description: "Your website has been added, but idea generation failed. You can generate ideas manually later.",
+            variant: "destructive",
+          });
+        },
       });
     },
-    onError: (error: any) => {
+    onError: (error: any, _newWebsite, context) => {
+      // Rollback to previous value on error
+      if (context?.previousWebsites) {
+        queryClient.setQueryData(["/api/websites"], context.previousWebsites);
+      }
       toast({
         title: "Error",
         description: error.message || "Failed to add website",
@@ -89,24 +168,28 @@ export default function Websites() {
   });
 
   const generateIdeas = useMutation({
-    mutationFn: async (websiteId: string) => {
-      const response = await apiRequest(`/api/websites/${websiteId}/generate-ideas`, "POST", { count: 5 });
-      return response.json();
+    mutationFn: async ({ websiteId, silent = false }: { websiteId: string; silent?: boolean }) => {
+      const result = await apiRequest(`/api/websites/${websiteId}/generate-ideas`, "POST", { count: 5 });
+      return { result, silent };
     },
-    onSuccess: (data, websiteId) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/websites", websiteId, "ideas"] });
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/websites", variables.websiteId, "ideas"] });
       queryClient.invalidateQueries({ queryKey: ["/api/websites"] });
-      toast({
-        title: "Ideas Generated",
-        description: `Generated ${data.length} new article ideas!`,
-      });
+      if (!data.silent) {
+        toast({
+          title: "Ideas Generated",
+          description: `Generated ${data.result.length} new article ideas!`,
+        });
+      }
     },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to generate ideas",
-        variant: "destructive",
-      });
+    onError: (error: any, variables) => {
+      if (!variables.silent) {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to generate ideas",
+          variant: "destructive",
+        });
+      }
     },
   });
 
@@ -117,9 +200,11 @@ export default function Websites() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/websites"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      setDeleteDialogOpen(false);
+      setWebsiteToDelete(null);
       toast({
         title: "Website Deleted",
-        description: "The website has been deleted.",
+        description: `"${websiteToDelete?.name || 'The website'}" has been deleted successfully.`,
       });
     },
     onError: (error: any) => {
@@ -130,6 +215,20 @@ export default function Websites() {
       });
     },
   });
+
+  const handleDeleteClick = (id: string) => {
+    const website = websites.find(w => w.id === id);
+    if (website) {
+      setWebsiteToDelete(website);
+      setDeleteDialogOpen(true);
+    }
+  };
+
+  const handleConfirmDelete = () => {
+    if (websiteToDelete) {
+      deleteWebsite.mutate(websiteToDelete.id);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -272,23 +371,12 @@ export default function Websites() {
       </div>
 
       {websites.length > 0 ? (
-        <div className="space-y-4">
-          {websites.map((website) => (
-            <WebsiteCard
-              key={website.id}
-              name={website.name}
-              url={website.url}
-              keywords={website.keywords}
-              status={website.status}
-              lastGenerated={website.lastGenerated ? formatRelativeTime(website.lastGenerated) : "Never"}
-              totalArticles={website.totalArticles}
-              nextScheduled={website.nextScheduled ? new Date(website.nextScheduled).toLocaleDateString() : "Not scheduled"}
-              onConfigure={() => console.log("Configure", website.id)}
-              onGenerate={() => generateIdeas.mutate(website.id)}
-              onDelete={() => deleteWebsite.mutate(website.id)}
-            />
-          ))}
-        </div>
+        <WebsiteTable 
+          websites={websites}
+          onGenerate={(id) => generateIdeas.mutate({ websiteId: id, silent: false })}
+          onConfigure={(website) => setLocation(`/websites/${website.id}/config`)}
+          onDelete={handleDeleteClick}
+        />
       ) : (
         <EmptyState
           icon={Globe}
@@ -298,6 +386,61 @@ export default function Websites() {
           onAction={() => setOpen(true)}
         />
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20">
+                <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <AlertDialogTitle>Delete Website</AlertDialogTitle>
+                <AlertDialogDescription className="mt-1">
+                  Are you sure you want to delete this website? This action cannot be undone.
+                </AlertDialogDescription>
+              </div>
+            </div>
+          </AlertDialogHeader>
+          {websiteToDelete && (
+            <div className="rounded-lg border bg-muted/50 p-4">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Website Details:</p>
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-semibold">Name:</span> {websiteToDelete.name}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-semibold">URL:</span> {websiteToDelete.url}
+                </p>
+                {websiteToDelete.totalArticles > 0 && (
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    <span className="font-semibold">Warning:</span> This website has {websiteToDelete.totalArticles} article{websiteToDelete.totalArticles !== 1 ? 's' : ''} associated with it.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setWebsiteToDelete(null)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={deleteWebsite.isPending}
+              className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+            >
+              {deleteWebsite.isPending ? (
+                <>
+                  <span className="mr-2">Deleting...</span>
+                </>
+              ) : (
+                "Delete Website"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

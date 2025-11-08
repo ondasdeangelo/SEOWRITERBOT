@@ -3,6 +3,7 @@ import MetricsCard from "@/components/MetricsCard";
 import ActivityFeed from "@/components/ActivityFeed";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Globe, CheckCircle, FileText, Plus, TrendingUp } from "lucide-react";
 import { useLocation } from "wouter";
 import type { Website } from "@shared/schema";
@@ -11,16 +12,20 @@ interface DashboardStats {
   activeWebsites: number;
   pendingApprovals: number;
   publishedThisMonth: number;
+  lastMonthActiveWebsites: number;
+  thisMonthApprovedIdeas: number;
+  lastMonthApprovedIdeas: number;
+  lastMonthPublished: number;
 }
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
 
-  const { data: stats } = useQuery<DashboardStats>({
+  const { data: stats, isLoading: isLoadingStats } = useQuery<DashboardStats>({
     queryKey: ["/api/stats"],
   });
 
-  const { data: websites } = useQuery<Website[]>({
+  const { data: websites, isLoading: isLoadingWebsites } = useQuery<Website[]>({
     queryKey: ["/api/websites"],
   });
 
@@ -65,19 +70,46 @@ export default function Dashboard() {
           title="Active Websites"
           value={stats?.activeWebsites || 0}
           icon={Globe}
-          trend={{ value: 20, isPositive: true }}
+          trend={(() => {
+            const current = stats?.activeWebsites || 0;
+            const lastMonth = stats?.lastMonthActiveWebsites || 0;
+            // If no data for last month, default to 0%
+            if (lastMonth === 0) return { value: 0, isPositive: true };
+            // Calculate percentage change
+            const percentage = Math.round(((current - lastMonth) / lastMonth) * 100);
+            return { value: Math.abs(percentage), isPositive: current >= lastMonth };
+          })()}
+          isLoading={isLoadingStats}
         />
         <MetricsCard
-          title="Pending Approvals"
-          value={stats?.pendingApprovals || 0}
+          title="Approved"
+          value={stats?.thisMonthApprovedIdeas || 0}
           icon={CheckCircle}
-          trend={{ value: 8, isPositive: false }}
+          trend={(() => {
+            const current = stats?.thisMonthApprovedIdeas || 0;
+            const lastMonth = stats?.lastMonthApprovedIdeas || 0;
+            // If no data for last month, default to 0%
+            if (lastMonth === 0) return { value: 0, isPositive: true };
+            // Calculate percentage change
+            const percentage = Math.round(((current - lastMonth) / lastMonth) * 100);
+            return { value: Math.abs(percentage), isPositive: current >= lastMonth };
+          })()}
+          isLoading={isLoadingStats}
         />
         <MetricsCard
           title="Published This Month"
           value={stats?.publishedThisMonth || 0}
           icon={FileText}
-          trend={{ value: 35, isPositive: true }}
+          trend={(() => {
+            const current = stats?.publishedThisMonth || 0;
+            const lastMonth = stats?.lastMonthPublished || 0;
+            // If no data for last month, default to 0%
+            if (lastMonth === 0) return { value: 0, isPositive: true };
+            // Calculate percentage change
+            const percentage = Math.round(((current - lastMonth) / lastMonth) * 100);
+            return { value: Math.abs(percentage), isPositive: current >= lastMonth };
+          })()}
+          isLoading={isLoadingStats}
         />
       </div>
 
@@ -114,7 +146,11 @@ export default function Dashboard() {
               onClick={() => setLocation("/ideas")}
             >
               <CheckCircle className="h-4 w-4 mr-2" />
-              Review Pending ({stats?.pendingApprovals || 0})
+              Review Pending {isLoadingStats ? (
+                <Skeleton className="h-4 w-6 ml-2 inline-block" />
+              ) : (
+                `(${stats?.pendingApprovals || 0})`
+              )}
             </Button>
           </div>
 
@@ -123,11 +159,19 @@ export default function Dashboard() {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Total Websites</span>
-                <span className="font-medium">{websites?.length || 0}</span>
+                {isLoadingWebsites ? (
+                  <Skeleton className="h-4 w-8" />
+                ) : (
+                  <span className="font-medium">{websites?.length || 0}</span>
+                )}
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">This Month</span>
-                <span className="font-medium">{stats?.publishedThisMonth || 0} articles</span>
+                {isLoadingStats ? (
+                  <Skeleton className="h-4 w-16" />
+                ) : (
+                  <span className="font-medium">{stats?.publishedThisMonth || 0} articles</span>
+                )}
               </div>
             </div>
           </div>
